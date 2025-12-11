@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>3D 萌犬養成 (生存大挑戰)</title>
+    <style>
+        /* --- CSS 樣式區 --- */
+        body { margin: 0; overflow: hidden; background-color: #87CEEB; font-family: "微軟正黑體", sans-serif; user-select: none; }
+        
+        .layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        .interactive { pointer-events: auto; }
+
+        /* 收容所 */
+        #shelter-screen {
+            background: #FFF5E6; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center;
+        }
+        .dog-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 20px; }
+        .breed-card {
+            background: white; padding: 15px; border-radius: 15px; text-align: center;
+            border: 2px solid #ddd; cursor: pointer; transition: 0.2s; width: 120px;
+        }
+        .breed-card:active { transform: scale(0.95); border-color: #FFB347; }
+        .breed-color { width: 50px; height: 50px; border-radius: 50%; margin: 0 auto 10px; }
+
+        /* UI 左上角 */
+        .header {
+            position: absolute; top: 10px; left: 10px; width: 180px;
+            background: rgba(255, 255, 255, 0.85); padding: 8px;
+            border-radius: 12px; backdrop-filter: blur(5px);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1); pointer-events: auto;
+            transform-origin: top left; transform: scale(0.9);
+        }
+        .stat-row { display: flex; align-items: center; margin-bottom: 4px; font-size: 12px; }
+        .stat-icon { width: 20px; text-align: center; }
+        .bar-container { flex: 1; display: flex; gap: 1px; height: 8px; }
+        .bar-segment { flex: 1; background: #ddd; border-radius: 1px; transition: 0.3s; }
+        .bar-segment.active { background: #4CAF50; }
+        .bar-segment.active.low { background: #ff4444; }
+
+        /* 底部按鈕 */
+        .actions {
+            position: absolute; bottom: 0; left: 0; width: 100%;
+            background: rgba(255, 255, 255, 0.95); padding: 15px 10px;
+            display: grid; grid-template-columns: repeat(5, 1fr);
+            gap: 5px; border-radius: 20px 20px 0 0; pointer-events: auto; box-sizing: border-box;
+        }
+        .btn {
+            border: none; background: white; border-radius: 12px;
+            padding: 5px 0; font-size: 12px; cursor: pointer;
+            box-shadow: 0 3px 0 #eee; border: 1px solid #eee;
+            display: flex; flex-direction: column; align-items: center;
+        }
+        .btn:active { transform: translateY(3px); box-shadow: none; }
+        .btn:disabled { opacity: 0.5; filter: grayscale(1); cursor: not-allowed; }
+        .btn-icon { font-size: 18px; margin-bottom: 2px; }
+
+        /* 小工具 */
+        #widget {
+            position: absolute; top: 10px; right: 10px; width: 140px;
+            background: rgba(0,0,0,0.7); color: white; border-radius: 12px;
+            padding: 10px; font-size: 12px; z-index: 50; display: none;
+            backdrop-filter: blur(4px); pointer-events: auto;
+        }
+        .close-widget { float: right; cursor: pointer; color: #aaa; }
+
+        /* 視窗與氣泡 */
+        .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 200; }
+        .modal-content { background: white; width: 80%; max-width: 300px; padding: 20px; border-radius: 20px; text-align: center; pointer-events: auto; }
+        .modal-opt { display: block; width: 100%; padding: 12px; margin: 8px 0; background: #f0f0f0; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; }
+        .modal-opt:hover { background: #e0e0e0; }
+
+        #msg-bubble {
+            position: absolute; top: 25%; left: 50%; transform: translateX(-50%);
+            background: white; padding: 10px 20px; border-radius: 20px;
+            font-weight: bold; display: none; animation: float 1.5s infinite;
+            border: 2px solid #333; z-index: 10; box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            text-align: center; white-space: nowrap; pointer-events: none;
+        }
+        @keyframes float { 0%,100%{transform:translate(-50%,0);} 50%{transform:translate(-50%,-10px);} }
+
+        /* Game Over 畫面 */
+        #game-over-screen {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 300;
+            display: none; flex-direction: column; align-items: center; justify-content: center;
+            color: white; text-align: center;
+        }
+        #game-over-screen h1 { color: #ff4444; font-size: 40px; margin-bottom: 10px; }
+        #game-over-screen button {
+            padding: 10px 20px; font-size: 18px; border-radius: 10px; border: none; background: white; cursor: pointer; margin-top: 20px;
+        }
+    </style>
+    
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+    </script>
+</head>
+<body>
+
+    <!-- 0. Game Over -->
+    <div id="game-over-screen">
+        <h1>☠️ 遊戲結束</h1>
+        <p>狗狗被獅子吃掉了...</p>
+        <button onclick="location.reload()">重新投胎</button>
+    </div>
+
+    <!-- 1. 收容所 -->
+    <div id="shelter-screen" class="layer interactive">
+        <h1>🐾 緣分收容所</h1><p>請選擇您的第一隻夥伴</p>
+        <div class="dog-grid">
+            <div class="breed-card" onclick="startGame('shiba')"><div class="breed-color" style="background: radial-gradient(#D2691E, #fff);"></div><b>柴犬</b></div>
+            <div class="breed-card" onclick="startGame('corgi')"><div class="breed-color" style="background: radial-gradient(#DAA520, #fff);"></div><b>柯基</b></div>
+            <div class="breed-card" onclick="startGame('golden')"><div class="breed-color" style="background: #F4C430;"></div><b>黃金獵犬</b></div>
+            <div class="breed-card" onclick="startGame('husky')"><div class="breed-color" style="background: radial-gradient(#ccc, #fff);"></div><b>哈士奇</b></div>
+        </div>
+    </div>
+
+    <!-- 2. 遊戲UI -->
+    <div id="game-ui" class="layer">
+        <div class="header">
+            <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                <span>🐶 <b><span id="name-display">我的狗狗</span></b></span><span id="age-display" style="background:#eee; padding:2px 6px; border-radius:8px; font-size:10px;">幼犬期</span>
+            </div>
+            <div class="stat-row"><span class="stat-icon">🍖</span><div class="bar-container" id="bar-hunger"></div></div>
+            <div class="stat-row"><span class="stat-icon">💧</span><div class="bar-container" id="bar-thirst"></div></div>
+            <div class="stat-row"><span class="stat-icon">⚡</span><div class="bar-container" id="bar-energy"></div></div>
+        </div>
+        <div id="msg-bubble">汪！</div>
+        <div class="actions">
+            <button class="btn" id="btn-feed" onclick="handleAction('feed')"><span class="btn-icon">🍖</span>餵食</button>
+            <button class="btn" id="btn-water" onclick="handleAction('water')"><span class="btn-icon">💧</span>喝水</button>
+            <button class="btn" id="btn-train" onclick="openTrainModal()"><span class="btn-icon">🔔</span>訓練</button>
+            <button class="btn" id="btn-play" onclick="handleAction('play')"><span class="btn-icon">🎾</span>運動</button>
+            <button class="btn" id="btn-clean" onclick="handleAction('clean')" disabled><span class="btn-icon">🧹</span>打掃</button>
+            <button class="btn" style="position:absolute; right:10px; bottom:80px; width:40px; border-radius:50%; box-shadow:0 4px 10px rgba(0,0,0,0.2);" onclick="toggleWidget()"><span class="btn-icon">📱</span></button>
+        </div>
+    </div>
+
+    <!-- 3. 小工具 -->
+    <div id="widget">
+        <span class="close-widget" onclick="toggleWidget()">×</span><h4 style="margin:0 0 5px 0; color:#FFB347">🐕 狀態</h4>
+        <div>飢餓: <span id="w-hunger">10</span>/10</div><div>口渴: <span id="w-thirst">10</span>/10</div><div>體力: <span id="w-energy">10</span>/10</div><div>狀態: <span id="w-status">發呆中</span></div>
+    </div>
+
+    <!-- 4. 訓練 & 問答 -->
+    <div id="train-modal" class="modal">
+        <div class="modal-content"><h3>🔔 訓練課程</h3><p>訓練會消耗口渴值喔！</p>
+            <button class="modal-opt" onclick="doTrain('sit')">🪑 坐下</button><button class="modal-opt" onclick="doTrain('hand')">🤝 握手</button><button class="modal-opt" style="background:#ddd" onclick="closeTrainModal()">取消</button>
+        </div>
+    </div>
+    <div id="quiz-modal" class="modal">
+        <div class="modal-content"><h3>🎓 養狗知識堂</h3><p id="quiz-q">題目...</p><div id="quiz-options"></div></div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- 參數 ---
+        const DECAY_TIME = 20;    
+        const GROWTH_TIME = 1800; 
+        const QUIZ_TIME = 420;    
+        const ANIMAL_SPAWN_TIME = 120; 
+        const ANIMAL_STAY_TIME = 300;  
+
+        const POOP_THRESHOLD = 3;
+        const PEE_THRESHOLD = 3;
+
+        const game = {
+            isGameOver: false,
+            startTime: Date.now(),
+            feedCount: 0, drinkCount: 0,
+            hasPoop: false, hasPee: false,
+            dogs: [], wildAnimals: [],
+            stats: { hunger: 10, thirst: 10, energy: 10 },
+            isAdult: false, hasSecondDog: false,
+            lastDecay: Date.now(),
+            lastAnimalSpawn: Date.now(),
+            startTs: Date.now(),
+            ball: null,
+            msgCooldown: 0 // 避免訊息洗版
+        };
+
+        let scene, camera, renderer, floor;
+        let poopMesh, peeMesh;
+        
+        function init3D() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB);
+            scene.fog = new THREE.Fog(0x87CEEB, 10, 40);
+
+            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(0, 7, 10);
+            camera.lookAt(0, 0, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            const hemiLight = new THREE.HemisphereLight(0xffffff, 0xffffff, 0.8);
+            scene.add(hemiLight);
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+            dirLight.position.set(5, 10, 5);
+            dirLight.castShadow = true;
+            scene.add(dirLight);
+
+            const floorGeo = new THREE.CircleGeometry(25, 32);
+            const floorMat = new THREE.MeshLambertMaterial({ color: 0x7cfc00 });
+            floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            createMesses();
+            createBall();
+
+            animate();
+            window.addEventListener('resize', onResize);
+            window.addEventListener('pointerdown', onPointerDown);
+        }
+
+        // --- 輔助模型 ---
+        function createMesses() {
+            const poopGeo = new THREE.ConeGeometry(0.2, 0.3, 8);
+            const poopMat = new THREE.MeshStandardMaterial({ color: 0x5D4037 });
+            poopMesh = new THREE.Mesh(poopGeo, poopMat); poopMesh.visible = false; scene.add(poopMesh);
+            const peeGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.02, 16);
+            const peeMat = new THREE.MeshBasicMaterial({ color: 0xFFD700, transparent: true, opacity: 0.6 });
+            peeMesh = new THREE.Mesh(peeGeo, peeMat); peeMesh.visible = false; scene.add(peeMesh);
+        }
+
+        function createBall() {
+            const geo = new THREE.SphereGeometry(0.25, 16, 16);
+            const mat = new THREE.MeshStandardMaterial({ color: 0xFF4500 });
+            game.ball = new THREE.Mesh(geo, mat); game.ball.visible = false; game.ball.castShadow = true; scene.add(game.ball);
+        }
+
+        // --- 狗狗模型 ---
+        function createCuteDog(breed) {
+            const dogGroup = new THREE.Group();
+            let furColor = 0xD2691E, whiteColor = 0xFFFFFF;
+            if(breed === 'corgi') furColor = 0xDAA520;
+            if(breed === 'golden') { furColor = 0xF4C430; whiteColor = 0xF4C430; }
+            if(breed === 'husky') { furColor = 0x999999; }
+
+            const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.45, 0.8, 4, 8), new THREE.MeshLambertMaterial({ color: furColor }));
+            body.rotation.x = Math.PI / 2; body.position.y = 0.6; body.castShadow = true; dogGroup.add(body);
+            if(breed !== 'golden') {
+                const belly = new THREE.Mesh(new THREE.CapsuleGeometry(0.42, 0.78, 4, 8), new THREE.MeshLambertMaterial({ color: whiteColor }));
+                belly.rotation.x = Math.PI / 2; belly.position.set(0, 0.58, 0); dogGroup.add(belly);
+            }
+            const headGroup = new THREE.Group();
+            const head = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.6, 0.6), new THREE.MeshLambertMaterial({ color: furColor })); headGroup.add(head);
+            const snout = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.22, 0.2), new THREE.MeshLambertMaterial({ color: whiteColor })); snout.position.set(0, -0.1, 0.35); headGroup.add(snout);
+            const nose = new THREE.Mesh(new THREE.SphereGeometry(0.07), new THREE.MeshBasicMaterial({ color: 0x222222 })); nose.position.set(0, 0, 0.45); headGroup.add(nose);
+            const eyeGeo = new THREE.SphereGeometry(0.05); const eyeMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+            const eyeL = new THREE.Mesh(eyeGeo, eyeMat); eyeL.position.set(0.18, 0.1, 0.3); headGroup.add(eyeL);
+            const eyeR = new THREE.Mesh(eyeGeo, eyeMat); eyeR.position.set(-0.18, 0.1, 0.3); headGroup.add(eyeR);
+            const earGeo = new THREE.ConeGeometry(0.12, 0.25, 4); const earMat = new THREE.MeshLambertMaterial({ color: furColor });
+            const earL = new THREE.Mesh(earGeo, earMat); const earR = new THREE.Mesh(earGeo, earMat);
+            if(breed === 'golden') { earL.rotation.z = -2; earL.position.set(0.35, 0, 0); earR.rotation.z = 2; earR.position.set(-0.35, 0, 0); } 
+            else { earL.position.set(0.2, 0.4, 0); earL.rotation.z = -0.3; earR.position.set(-0.2, 0.4, 0); earR.rotation.z = 0.3; }
+            headGroup.add(earL, earR); headGroup.position.set(0, 1.1, 0.5); dogGroup.add(headGroup);
+
+            const legs = []; const legGeo = new THREE.CylinderGeometry(0.11, 0.1, 0.5); const legMat = new THREE.MeshLambertMaterial({ color: whiteColor });
+            function createLeg(x, z) { const leg = new THREE.Mesh(legGeo, legMat); leg.position.set(x, 0.25, z); dogGroup.add(leg); return leg; }
+            legs.push(createLeg(-0.25, -0.3)); legs.push(createLeg(0.25, -0.3)); legs.push(createLeg(-0.25, 0.3)); legs.push(createLeg(0.25, 0.3));
+            const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.04, 0.4), new THREE.MeshLambertMaterial({ color: furColor })); tail.position.set(0, 0.7, -0.5); tail.rotation.x = Math.PI / 4; dogGroup.add(tail);
+
+            dogGroup.userData = { 
+                legs: legs, tail: tail, head: headGroup, body: body, 
+                target: null, isMoving: false, isSitting: false, isShaking: false, isRiding: false, ridingTarget: null,
+                offset: Math.random() * 100 
+            };
+            dogGroup.scale.set(0.6, 0.6, 0.6); scene.add(dogGroup); game.dogs.push(dogGroup); return dogGroup;
+        }
+
+        // --- 亂入動物模型 (修復消失BUG: 強制 frustumCulled = false) ---
+        function createWildAnimal(type) {
+            const group = new THREE.Group();
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 8 + Math.random() * 4;
+            group.position.set(Math.cos(angle)*dist, 0, Math.sin(angle)*dist);
+            group.lookAt(0, 0, 0);
+            let speed = 0.04; 
+
+            if (type === 'turtle') {
+                const shell = new THREE.Mesh(new THREE.SphereGeometry(0.45, 16, 16, 0, Math.PI*2, 0, Math.PI/2), new THREE.MeshLambertMaterial({ color: 0x228B22 }));
+                shell.scale.y = 0.6; shell.position.y = 0.1; group.add(shell);
+                const skinMat = new THREE.MeshLambertMaterial({ color: 0x8FBC8F });
+                const head = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.15, 0.25), skinMat); head.position.set(0, 0.2, 0.4); group.add(head);
+                speed = 0.01;
+            } else if (type === 'lion') {
+                const body = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.6, 1.2), new THREE.MeshLambertMaterial({ color: 0xDAA520 }));
+                body.position.y = 0.6; group.add(body);
+                const headGroup = new THREE.Group();
+                const face = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshLambertMaterial({ color: 0xDAA520 }));
+                const mane = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.4), new THREE.MeshLambertMaterial({ color: 0x8B4513 }));
+                mane.position.set(0, 0, -0.2); headGroup.add(mane); headGroup.add(face);
+                headGroup.position.set(0, 0.9, 0.6); group.add(headGroup);
+                speed = 0.06;
+            } else if (type === 'penguin') {
+                const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.35, 0.8, 4, 8), new THREE.MeshLambertMaterial({ color: 0x111111 }));
+                body.position.y = 0.5; group.add(body);
+                const belly = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.6, 0.1), new THREE.MeshLambertMaterial({ color: 0xFFFFFF }));
+                belly.position.set(0, 0.5, 0.3); group.add(belly);
+                const beak = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.2, 8), new THREE.MeshLambertMaterial({ color: 0xFFA500 }));
+                beak.rotation.x = Math.PI / 2; beak.position.set(0, 0.8, 0.4); group.add(beak);
+                speed = 0.03;
+            }
+
+            // **關鍵修復**: 遍歷所有子物件，關閉視錐體裁剪，防止身體消失
+            group.traverse(obj => {
+                if (obj.isMesh) obj.frustumCulled = false;
+            });
+
+            group.userData = { 
+                despawnTime: Date.now() + ANIMAL_STAY_TIME * 1000,
+                type: type, speed: speed, target: null, waitTimer: 0, animOffset: Math.random() * 100
+            };
+            scene.add(group); game.wildAnimals.push(group);
+        }
+
+        // --- 邏輯函數 ---
+        window.startGame = (breed) => {
+            document.getElementById('shelter-screen').style.display = 'none'; document.getElementById('game-ui').style.display = 'flex';
+            init3D(); createCuteDog(breed); renderBars(); setInterval(gameLoop, 1000);
+        };
+
+        window.handleAction = (type) => {
+            if(game.isGameOver) return;
+            if ((game.hasPoop || game.hasPee) && type !== 'clean') { showMsg("太髒了！先打掃！🧹"); return; }
+            if (type === 'feed') { if(game.stats.hunger < 10) { game.stats.hunger++; game.stats.energy = Math.min(10, game.stats.energy + 1); game.feedCount++; showMsg("好香喔！(體力UP)"); dogJump(); } else showMsg("吃太飽了..."); if (game.feedCount >= POOP_THRESHOLD) spawnMess('poop'); } 
+            else if (type === 'water') { if(game.stats.thirst < 10) { game.stats.thirst++; game.drinkCount++; showMsg("咕嚕咕嚕💧"); } else showMsg("不渴喔..."); if (game.drinkCount >= PEE_THRESHOLD) spawnMess('pee'); } 
+            else if (type === 'play') { if(game.stats.energy > 0) { game.stats.energy--; game.stats.hunger = Math.max(1, game.stats.hunger - 1); showMsg("追球球！🎾"); startBallGame(); } else showMsg("沒力氣了...要吃飯"); } 
+            else if (type === 'clean') { cleanMess(); }
+            renderBars(); updateWidget();
+        };
+
+        window.openTrainModal = () => { if (game.stats.thirst <= 0) { showMsg("太渴了...無法訓練"); return; } document.getElementById('train-modal').style.display = 'flex'; };
+        window.closeTrainModal = () => { document.getElementById('train-modal').style.display = 'none'; };
+        window.doTrain = (action) => { if (game.stats.thirst <= 0) { showMsg("太渴了...無法訓練"); closeTrainModal(); return; } game.stats.thirst--; renderBars(); updateWidget(); closeTrainModal(); if (action === 'sit') { showMsg("坐下！"); game.dogs.forEach(d => animateSit(d)); } else if (action === 'hand') { showMsg("握手！"); game.dogs.forEach(d => animateHand(d)); } };
+
+        function animateSit(dog) { dog.userData.isSitting = true; let t = 0; const sitInt = setInterval(() => { t += 0.1; dog.userData.body.rotation.x = Math.PI/2 - (Math.PI/4) * Math.sin(t); dog.userData.head.position.y = 1.1 + Math.sin(t)*0.2; dog.userData.head.position.z = 0.5 - Math.sin(t)*0.3; if (t >= Math.PI) { clearInterval(sitInt); setTimeout(() => { dog.userData.body.rotation.x = Math.PI/2; dog.userData.head.position.set(0, 1.1, 0.5); dog.userData.isSitting = false; }, 1000); } }, 30); }
+        function animateHand(dog) { dog.userData.isShaking = true; let t = 0; const handInt = setInterval(() => { t += 0.2; dog.userData.legs[3].position.y = 0.25 + Math.sin(t)*0.3; dog.userData.legs[3].rotation.x = -Math.sin(t)*0.5; if (t >= Math.PI * 2) { clearInterval(handInt); dog.userData.legs[3].position.y = 0.25; dog.userData.legs[3].rotation.x = 0; dog.userData.isShaking = false; } }, 30); }
+        window.toggleWidget = () => { const w = document.getElementById('widget'); w.style.display = w.style.display === 'none' ? 'block' : 'none'; updateWidget(); };
+
+        function gameLoop() {
+            if (game.isGameOver) return;
+            const now = Date.now(); const elapsed = (now - game.startTs) / 1000;
+            if ((now - game.lastDecay) / 1000 >= DECAY_TIME) { game.stats.hunger = Math.max(0, game.stats.hunger - 1); game.stats.thirst = Math.max(0, game.stats.thirst - 1); game.stats.energy = Math.max(0, game.stats.energy - 1); game.lastDecay = now; renderBars(); updateWidget(); if(game.stats.hunger === 0) showMsg("我好餓..."); }
+            
+            // 生成動物
+            if ((now - game.lastAnimalSpawn) / 1000 >= ANIMAL_SPAWN_TIME) {
+                game.lastAnimalSpawn = now;
+                const animals = ['turtle', 'lion', 'penguin']; const type = animals[Math.floor(Math.random() * animals.length)];
+                createWildAnimal(type);
+                let msg = ""; if(type === 'turtle') msg = "傻眼，怎麼有一隻烏龜🐢"; else if(type === 'lion') msg = "挖靠，怎麼有一隻獅子🦁"; else if(type === 'penguin') msg = "太扯了，企鵝都來了🐧"; showMsg(msg);
+            }
+            
+            // 動物離開
+            game.wildAnimals.forEach((grp, index) => {
+                if (now > grp.userData.despawnTime) {
+                    // 如果狗狗正在騎這隻烏龜，要讓狗下來
+                    game.dogs.forEach(d => {
+                        if (d.userData.ridingTarget === grp) {
+                            d.userData.isRiding = false;
+                            d.userData.ridingTarget = null;
+                            d.position.y = 0; // 回到地面
+                        }
+                    });
+                    scene.remove(grp); game.wildAnimals.splice(index, 1); showMsg("動物跑走了...");
+                }
+            });
+
+            if (!game.isAdult && elapsed >= GROWTH_TIME) { game.isAdult = true; game.dogs.forEach(d => { let s = 0.6; const growInt = setInterval(() => { s += 0.05; d.scale.set(s,s,s); if(s >= 1.2) { clearInterval(growInt); document.getElementById('age-display').innerText = "成犬期"; showMsg("長大了！✨"); } }, 50); }); }
+            if (!game.hasSecondDog && elapsed >= QUIZ_TIME && !window.quizPending) { window.quizPending = true; showQuiz(); }
+        }
+
+        // --- 互動觸發 ---
+        function checkCollisions() {
+            if (game.isGameOver) return;
+            const dog = game.dogs[0];
+            if (!dog) return;
+
+            game.wildAnimals.forEach(animal => {
+                const dist = dog.position.distanceTo(animal.position);
+                const type = animal.userData.type;
+
+                // 企鵝互動 (距離 < 1.5)
+                if (type === 'penguin' && dist < 1.5) {
+                    if (game.msgCooldown <= 0) {
+                        showMsg("他奶奶的臭企鵝離我遠一點");
+                        game.msgCooldown = 100; // 避免訊息一直跳
+                    }
+                }
+                
+                // 獅子互動 (距離 < 1.5) -> GAME OVER
+                if (type === 'lion' && dist < 1.5) {
+                    gameOver();
+                }
+
+                // 烏龜互動 (距離 < 1.0) -> 騎乘
+                if (type === 'turtle' && dist < 1.0) {
+                    if (!dog.userData.isRiding) {
+                        dog.userData.isRiding = true;
+                        dog.userData.ridingTarget = animal;
+                        showMsg("兜風囉");
+                    }
+                }
+            });
+
+            if(game.msgCooldown > 0) game.msgCooldown--;
+        }
+
+        function gameOver() {
+            game.isGameOver = true;
+            document.getElementById('game-over-screen').style.display = 'flex';
+        }
+
+        function spawnMess(type) { const d = game.dogs[0]; const offset = (Math.random() - 0.5) * 1.5; if (type === 'poop' && !game.hasPoop) { poopMesh.position.set(d.position.x + offset, 0.15, d.position.z + 0.8); poopMesh.visible = true; game.hasPoop = true; } else if (type === 'pee' && !game.hasPee) { peeMesh.position.set(d.position.x - offset, 0.02, d.position.z + 0.5); peeMesh.visible = true; game.hasPee = true; } renderBars(); }
+        function cleanMess() { poopMesh.visible = false; game.hasPoop = false; game.feedCount = 0; peeMesh.visible = false; game.hasPee = false; game.drinkCount = 0; showMsg("乾淨了！✨"); renderBars(); }
+        function startBallGame() { const targetX = (Math.random() - 0.5) * 10; const targetZ = (Math.random() - 0.5) * 10; game.ball.position.set(0, 5, 0); game.ball.visible = true; let dy = 0; const dropInt = setInterval(() => { game.ball.position.x += (targetX - game.ball.position.x) * 0.1; game.ball.position.z += (targetZ - game.ball.position.z) * 0.1; game.ball.position.y += dy; dy -= 0.05; if(game.ball.position.y <= 0.25) { game.ball.position.y = 0.25; clearInterval(dropInt); game.dogs.forEach(d => { d.userData.target = new THREE.Vector3(targetX, 0, targetZ); d.userData.isMoving = true; }); } }, 30); }
+        function renderBars() { ['hunger', 'thirst', 'energy'].forEach(key => { const container = document.getElementById('bar-' + key); container.innerHTML = ''; const val = game.stats[key]; for(let i=0; i<10; i++) { const div = document.createElement('div'); div.className = 'bar-segment'; if (i < val) { div.classList.add('active'); if(val <= 3) div.classList.add('low'); } container.appendChild(div); } }); document.getElementById('btn-clean').disabled = !(game.hasPoop || game.hasPee); }
+        function updateWidget() { document.getElementById('w-hunger').innerText = game.stats.hunger; document.getElementById('w-thirst').innerText = game.stats.thirst; document.getElementById('w-energy').innerText = game.stats.energy; let status = "發呆中"; if(game.hasPoop || game.hasPee) status = "環境髒亂"; else if(game.stats.hunger < 3) status = "肚子餓"; document.getElementById('w-status').innerText = status; }
+        function showMsg(text) { const b = document.getElementById('msg-bubble'); b.innerText = text; b.style.display = 'block'; setTimeout(() => b.style.display = 'none', 3000); }
+        function dogJump() { game.dogs.forEach(d => { let v = 0.2; const jumpInt = setInterval(() => { d.position.y += v; v -= 0.02; if(d.position.y <= 0) { d.position.y = 0; clearInterval(jumpInt); } }, 16); }); }
+        function showQuiz() { const modal = document.getElementById('quiz-modal'); const qBox = document.getElementById('quiz-q'); const optBox = document.getElementById('quiz-options'); modal.style.display = 'flex'; qBox.innerText = "狗狗的鼻子為什麼是濕的？"; const opts = [ { t: "生病流鼻水", c: false }, { t: "增加嗅覺靈敏度", c: true }, { t: "剛剛喝完水", c: false } ]; optBox.innerHTML = ""; opts.forEach(o => { const btn = document.createElement('button'); btn.className = 'quiz-opt'; btn.innerText = o.t; btn.onclick = () => { modal.style.display = 'none'; if(o.c) { showMsg("答對了！新夥伴加入！🐶"); const breeds = ['shiba', 'corgi', 'golden', 'husky']; const newBreed = breeds[Math.floor(Math.random()*breeds.length)]; const d2 = createCuteDog(newBreed); d2.position.set(-2, 0, 0); game.hasSecondDog = true; } else showMsg("答錯囉..."); }; optBox.appendChild(btn); }); }
+
+        const raycaster = new THREE.Raycaster(); const pointer = new THREE.Vector2();
+        function onPointerDown(event) {
+            if (game.isGameOver) return;
+            if (event.target.closest('.header') || event.target.closest('.actions') || event.target.closest('#widget') || event.target.closest('.modal')) return;
+            pointer.x = (event.clientX / window.innerWidth) * 2 - 1; pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(pointer, camera); const intersects = raycaster.intersectObject(floor);
+            if (intersects.length > 0) { const point = intersects[0].point; game.dogs.forEach((d, idx) => { if(d.userData.isRiding) return; const offset = (idx===0) ? 0 : (Math.random()-0.5)*2; d.userData.target = new THREE.Vector3(point.x+offset, 0, point.z+offset); d.userData.isMoving = true; }); }
+        }
+
+        function onResize() { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); }
+        const clock = new THREE.Clock();
+        
+        function animate() {
+            if (game.isGameOver) return;
+            requestAnimationFrame(animate); const time = clock.getElapsedTime(); const delta = clock.getDelta();
+            
+            checkCollisions(); // 檢查互動
+
+            // 狗狗邏輯
+            game.dogs.forEach(d => {
+                // 如果正在騎烏龜，坐標鎖定烏龜
+                if (d.userData.isRiding && d.userData.ridingTarget) {
+                    const turtle = d.userData.ridingTarget;
+                    d.position.copy(turtle.position);
+                    d.position.y += 0.5; // 坐在烏龜背上
+                    d.rotation.copy(turtle.rotation);
+                    return; // 跳過自主移動
+                }
+
+                if (d.userData.isSitting || d.userData.isShaking) return;
+                if (d.userData.isMoving && d.userData.target) {
+                    const cur = d.position; const tgt = d.userData.target; d.lookAt(tgt.x, d.position.y, tgt.z);
+                    if (cur.distanceTo(tgt) > 0.1) {
+                        const dir = new THREE.Vector3().subVectors(tgt, cur).normalize(); d.position.add(dir.multiplyScalar(0.06));
+                        d.userData.legs[0].rotation.x = Math.sin(time*15)*0.5; d.userData.legs[1].rotation.x = Math.cos(time*15)*0.5; d.userData.legs[2].rotation.x = Math.cos(time*15)*0.5; d.userData.legs[3].rotation.x = Math.sin(time*15)*0.5; d.userData.body.position.y = 0.6 + Math.sin(time*20)*0.02; 
+                    } else { d.userData.isMoving = false; d.userData.legs.forEach(l => l.rotation.x = 0); if (game.ball.visible && cur.distanceTo(game.ball.position) < 1) { game.ball.visible = false; showMsg("撿到了！"); } }
+                } else { d.userData.head.rotation.z = Math.sin(time*2)*0.05; d.userData.tail.rotation.z = Math.sin(time*10)*0.2; }
+            });
+
+            // 野生動物 AI
+            game.wildAnimals.forEach(grp => {
+                if (!grp.userData.target) {
+                    grp.userData.waitTimer -= 0.016; 
+                    if (grp.userData.waitTimer <= 0) {
+                        const angle = Math.random() * Math.PI * 2; const dist = Math.random() * 8;
+                        grp.userData.target = new THREE.Vector3(Math.cos(angle)*dist, 0, Math.sin(angle)*dist);
+                    }
+                } else {
+                    const cur = grp.position; const tgt = grp.userData.target; const speed = grp.userData.speed; grp.lookAt(tgt.x, cur.y, tgt.z);
+                    if (cur.distanceTo(tgt) > 0.2) {
+                        const dir = new THREE.Vector3().subVectors(tgt, cur).normalize(); grp.position.add(dir.multiplyScalar(speed));
+                        if (grp.userData.type === 'penguin') grp.rotation.z = Math.sin(time * 10) * 0.1;
+                        else if (grp.userData.type === 'lion') grp.position.y = Math.abs(Math.sin(time * 10)) * 0.1;
+                    } else { grp.userData.target = null; grp.userData.waitTimer = 2 + Math.random() * 3; grp.rotation.z = 0; }
+                }
+            });
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
